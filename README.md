@@ -1,3 +1,7 @@
+# Update to Swift + some other tweaks
+
+This project is a fork of the sample Apple project at https://developer.apple.com/documentation/metal/basic_tasks_and_concepts/performing_calculations_on_a_gpu.  The local changes to this project ports the project to Swift and modifies it to initialize the source arrays on the GPU instead of CPU.
+
 # Performing Calculations on a GPU
 
 Use Metal to find GPUs and perform calculations on them.

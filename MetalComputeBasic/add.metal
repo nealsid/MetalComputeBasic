@@ -17,3 +17,13 @@ kernel void add_arrays(device const float* inA,
     // calls this function.
     result[index] = inA[index] + inB[index];
 }
+
+/*
+ 
+ Abstract:
+ A shader that sets each array element to the thread index.
+ */
+kernel void fill_array(device float* in, uint index [[thread_position_in_grid]])
+{
+    in[index] = index;
+}
