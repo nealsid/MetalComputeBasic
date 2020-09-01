@@ -41,27 +41,20 @@ class MetalAdder {
         _mBufferB = _mDevice.makeBuffer(length: _mBufferSize, options: MTLResourceOptions.storageModeShared)!
         _mBufferResult = _mDevice.makeBuffer(length: _mBufferSize, options: MTLResourceOptions.storageModeShared)!
     }
-    
-    func generateRandomFloatData (buffer : MTLBuffer) {
-        let bPtr = buffer.contents()
-        for i in 0..<_mArrayLength {
-            bPtr.storeBytes(of: Float.random(in: 0...1), toByteOffset: i * 4, as: Float.self)
-        }
-    }
-    
+
     func sendComputeCommand() {
         let commandBuffer = _mCommandQueue.makeCommandBuffer()!
         
         var fillEncoder = commandBuffer.makeComputeCommandEncoder()!
-        encodeFillCommands(fillEncoder, buffer: _mBufferA)
+        encodeFillCommandsInEncoder(fillEncoder, toDestBuffer: _mBufferA)
         fillEncoder.endEncoding()
         
         fillEncoder = commandBuffer.makeComputeCommandEncoder()!
-        encodeFillCommands(fillEncoder, buffer: _mBufferB)
+        encodeFillCommandsInEncoder(fillEncoder, toDestBuffer: _mBufferB)
         fillEncoder.endEncoding()
         
         let computeEncoder = commandBuffer.makeComputeCommandEncoder()!
-        encodeAddCommand(computeEncoder)
+        encodeAddCommandInEncoder(computeEncoder)
         computeEncoder.endEncoding()
 
         commandBuffer.commit()
@@ -69,33 +62,41 @@ class MetalAdder {
         verifyResults()
     }
     
-    func encodeFillCommands(_ fillEncoder : MTLComputeCommandEncoder, buffer : MTLBuffer) {
+    func threadGroupSizeForPipeline(_ function : MTLComputePipelineState) -> MTLSize {
+        return MTLSizeMake(min(function.maxTotalThreadsPerThreadgroup, _mArrayLength), 1, 1)
+    }
+    
+    func encodeFillCommandsInEncoder(_ fillEncoder : MTLComputeCommandEncoder, toDestBuffer buffer : MTLBuffer) {
         fillEncoder.setComputePipelineState(_mFillFunctionPSO)
         fillEncoder.setBuffer(buffer, offset: 0, index: 0)
 
-        let mtlThreadGroupSize = MTLSizeMake(min(_mFillFunctionPSO.maxTotalThreadsPerThreadgroup, _mArrayLength), 1, 1)
-        fillEncoder.dispatchThreads(_mGridSize, threadsPerThreadgroup: mtlThreadGroupSize)
+        fillEncoder.dispatchThreads(_mGridSize, threadsPerThreadgroup: threadGroupSizeForPipeline(_mFillFunctionPSO))
     }
     
-    func encodeAddCommand(_ computeEncoder : MTLComputeCommandEncoder) {
+    func encodeAddCommandInEncoder(_ computeEncoder : MTLComputeCommandEncoder) {
         computeEncoder.setComputePipelineState(_mAddFunctionPSO)
         computeEncoder.setBuffer(_mBufferA, offset: 0, index: 0)
         computeEncoder.setBuffer(_mBufferB, offset: 0, index: 1)
         computeEncoder.setBuffer(_mBufferResult, offset: 0, index: 2)
 
-        let mtlThreadGroupSize = MTLSizeMake(min(_mAddFunctionPSO.maxTotalThreadsPerThreadgroup, _mArrayLength), 1, 1)
-        computeEncoder.dispatchThreads(_mGridSize, threadsPerThreadgroup: mtlThreadGroupSize)
+        computeEncoder.dispatchThreads(_mGridSize, threadsPerThreadgroup: threadGroupSizeForPipeline(_mAddFunctionPSO))
     }
     
     func verifyResults() {
-        let bufferA = UnsafeBufferPointer(start: _mBufferA.contents().assumingMemoryBound(to: Float.self), count: _mArrayLength)
-        let bufferB = UnsafeBufferPointer(start: _mBufferB.contents().assumingMemoryBound(to: Float.self), count: _mArrayLength)
-        let resultsBuffer = UnsafeBufferPointer(start: _mBufferResult.contents().assumingMemoryBound(to: Float.self), count: _mArrayLength)
-        for ((i1,b1),(_,b2)) in zip(bufferA.enumerated(), bufferB.enumerated()) {
-            let a = b1
-            let b = b2
-            let f = resultsBuffer[i1]
-            print("Compute: index=\(i1) result=\(f) vs \(a + b) = \(a) + \(b)")
+        // Closure to create an unsafe buffer from an MTL Buffer, fixing both the length and that it's bound to floats.
+        let createBuffer = { (x : MTLBuffer) -> UnsafeBufferPointer<Float> in
+            UnsafeBufferPointer(start: x.contents().assumingMemoryBound(to: Float.self), count: self._mArrayLength)
+            }
+        
+        let bufferA = createBuffer(_mBufferA)
+        let bufferB = createBuffer(_mBufferB)
+        let resultsBuffer = createBuffer(_mBufferResult)
+
+        for ((i,a),(_,b)) in zip(bufferA.enumerated(), bufferB.enumerated()) {
+            let f = resultsBuffer[i]
+            if (f != a + b) {
+                print("Compute FAILED: index=\(i1) result=\(f) vs \(a + b) = \(a) + \(b)")
+            }
         }
     }
 }
